@@ -10,7 +10,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
+          cpus: '0.50'
           memory: '0.5GB'
   api2:
     <<: *api
@@ -28,8 +28,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.75'
-          memory: '1.5GB'
+          cpus: '0.50'
+          memory: '1GB'
   nginx:
     image: nginx:latest
     volumes:
@@ -43,7 +43,7 @@ services:
       resources:
         limits:
           cpus: '0.25'
-          memory: '0.5GB'
+          memory: '1GB'
 networks:
   default:
     driver: bridge

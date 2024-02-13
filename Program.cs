@@ -8,6 +8,8 @@ var app = builder.Build();
 
 app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request, AppDbContext dbContext) =>
 {
+    if(request is null) return Results.StatusCode(StatusCodes.Status400BadRequest);
+
     if (request.Tipo != 'd' && request.Tipo != 'c' || request.Valor <= 0 || request.Descricao.Length < 1)
     {
         return Results.StatusCode(StatusCodes.Status400BadRequest);
@@ -30,6 +32,16 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
 
         cliente.Saldo -= request.Valor;
     }
+
+    await dbContext.Transacoes.AddAsync(new Transacao {
+        Id = 0,
+        Valor = request.Valor,
+        Tipo = request.Tipo,
+        Descricao = request.Descricao,
+        Realizado_Em = DateTime.UtcNow,
+        ClienteId = cliente.Id,
+        Cliente = cliente
+    });
 
     await dbContext.SaveChangesAsync();
 
