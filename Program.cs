@@ -1,164 +1,102 @@
-using Microsoft.EntityFrameworkCore;
+string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;Maximum Pool Size=131072;";
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-
 var app = builder.Build();
 
-app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request, AppDbContext dbContext) =>
+app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request) =>
 {
-    if(request is null) return Results.StatusCode(StatusCodes.Status400BadRequest);
-
-    if (request.Tipo != 'd' && request.Tipo != 'c' || request.Valor <= 0 || request.Descricao.Length < 1)
+    if (request is null || request.Tipo != 'd' && request.Tipo != 'c' || request.Valor <= 0 || request.Descricao.Length < 1)
     {
         return Results.StatusCode(StatusCodes.Status400BadRequest);
     }
 
-    var cliente = AppDbContext.GetCliente(dbContext, id);
+    var connection = new Npgsql.NpgsqlConnection(connectionString);
+    connection.Open();
 
-    if (cliente is null) return Results.StatusCode(StatusCodes.Status404NotFound);
+    string query = "SELECT saldo, limite FROM cliente WHERE id = @id";
+    var command = new Npgsql.NpgsqlCommand(query, connection);
+    var read = await command.ExecuteReaderAsync();
 
-    if (request.Tipo == 'c')
-    {
-        cliente.Saldo += request.Valor;
-    }
-    else if (request.Tipo == 'd')
-    {
-        if (cliente.Saldo - request.Valor < -cliente.Limite)
-        {
-            return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
-        }
+    if (!read.Read()) return Results.StatusCode(StatusCodes.Status404NotFound);
 
-        cliente.Saldo -= request.Valor;
-    }
+    var saldo = read.GetInt32(0);
+    var limite = read.GetInt32(1);
 
-    await dbContext.Transacoes.AddAsync(new Transacao {
-        Id = 0,
-        Valor = request.Valor,
-        Tipo = request.Tipo,
-        Descricao = request.Descricao,
-        Realizado_Em = DateTime.UtcNow,
-        ClienteId = cliente.Id,
-        Cliente = cliente
-    });
+    if (request.Tipo == 'c') saldo += request.Valor;
+    else if (request.Tipo == 'd' && saldo - request.Valor < -limite) return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
+    else saldo -= request.Valor;
 
-    await dbContext.SaveChangesAsync();
+    query = "INSERT INTO transacao (valor, tipo, descricao, realizado_em, cliente_id) VALUES (@valor, @tipo, @descricao, @realizado_em, @cliente_id)";
+    command = new Npgsql.NpgsqlCommand(query, connection);
+    command.Parameters.AddWithValue("valor", request.Valor);
+    command.Parameters.AddWithValue("tipo", request.Tipo);
+    command.Parameters.AddWithValue("descricao", request.Descricao);
+    command.Parameters.AddWithValue("realizado_em", DateTime.UtcNow);
+    command.Parameters.AddWithValue("cliente_id", id);
+
+    await command.ExecuteNonQueryAsync();
+
+    query = "UPDATE cliente SET saldo = @saldo WHERE id = @id";
+    command = new Npgsql.NpgsqlCommand(query, connection);
+    command.Parameters.AddWithValue("saldo", saldo);
+    command.Parameters.AddWithValue("id", id);
+
+    await command.ExecuteNonQueryAsync();
+
+    await connection.CloseAsync();
 
     return Results.Ok(new
     {
-        Limite = cliente.Limite,
-        Saldo = cliente.Saldo,
+        Limite = limite,
+        Saldo = saldo,
     });
-
 });
 
-app.MapGet("/clientes/{id}/extrato", (int id, AppDbContext dbContext) =>
+app.MapGet("/clientes/{id}/extrato", async (int id) =>
 {
-    var cliente = AppDbContext.GetClienteAndTrasacoesWithLatestTransactions(dbContext, id);
+    var connection = new Npgsql.NpgsqlConnection(connectionString);
+    connection.Open();
 
-    if (cliente is null) return Results.StatusCode(StatusCodes.Status404NotFound);
+    string query = "SELECT saldo, limite FROM cliente WHERE id = @id";
+    var command = new Npgsql.NpgsqlCommand(query, connection);
+    var read = await command.ExecuteReaderAsync();
 
-    var saldoTotal = cliente.Saldo;
-    var dataExtrato = DateTime.UtcNow;
-    var limite = cliente.Limite;
+    if (!read.Read()) return Results.StatusCode(StatusCodes.Status404NotFound);
 
-    var ultimasTransacoes = cliente.Transacoes
-        .Select(t => new
+    var saldo = read.GetInt32(0);
+    var limite = read.GetInt32(1);
+    var data_extrato = DateTime.UtcNow;
+    var ultimas_transacoes = new List<object>();
+
+    query = "SELECT valor, tipo, descricao, realizada_em FROM Transacao WHERE cliente_id = @cliente_id ORDER BY realizada_em DESC LIMIT 10";
+    command = new Npgsql.NpgsqlCommand(query, connection);
+    command.Parameters.AddWithValue("cliente_id", id);
+    var reader = await command.ExecuteReaderAsync();
+
+    while (await reader.ReadAsync())
+    {
+        ultimas_transacoes.Add(new
         {
-            valor = t.Valor,
-            tipo = t.Tipo,
-            descricao = t.Descricao,
-            realizada_em = t.Realizado_Em
-        })
-        .ToList();
+            valor = reader.GetInt32(0),
+            tipo = reader.GetChar(1),
+            descricao = reader.GetString(2),
+            realizada_em = reader.GetDateTime(3)
+        });
+    }
 
-    var extrato = new
+    await connection.CloseAsync();
+
+    return Results.Ok(new
     {
         saldo = new
         {
-            total = saldoTotal,
-            data_extrato = dataExtrato,
-            limite = limite
+            total = saldo,
+            data_extrato = data_extrato,
+            limite = limite,
         },
-        ultimas_transacoes = ultimasTransacoes
-    };
-
-    return Results.Ok(extrato);
+        ultimas_transacoes = ultimas_transacoes
+    });
 });
 
 await app.RunAsync("http://0.0.0.0:80");
-
 public record TransacaoPayload(int Valor, char Tipo, string Descricao);
-public class Cliente
-{
-    public int Id { get; set; }
-    public int Saldo { get; set; }
-    public int Limite { get; set; }
-    public virtual IEnumerable<Transacao> Transacoes { get; set; } = Enumerable.Empty<Transacao>();
-}
-
-public class Transacao
-{
-    public required int Id { get; set; }
-    public required int Valor { get; set; }
-    public required char Tipo { get; set; }
-    public required string Descricao { get; set; }
-    public required DateTime Realizado_Em { get; set; } = DateTime.Now;
-    public required int ClienteId { get; set; }
-    public required virtual Cliente Cliente { get; set; }
-}
-
-public class AppDbContext : DbContext
-{
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
-    public DbSet<Cliente> Clientes { get; set; }
-    public DbSet<Transacao> Transacoes { get; set; }
-
-    public static Func<AppDbContext, int, Cliente?> GetCliente =
-    EF.CompileQuery((AppDbContext context, int id) =>
-        context.Clientes.FirstOrDefault(c => c.Id == id));
-
-    public static Func<AppDbContext, int, Cliente?> GetClienteAndTrasacoesWithLatestTransactions =
-        EF.CompileQuery((AppDbContext context, int id) =>
-            context.Clientes
-                .Where(c => c.Id == id)
-                .Select(c => new Cliente
-                {
-                    Id = c.Id,
-                    Saldo = c.Saldo,
-                    Limite = c.Limite,
-                    Transacoes = c.Transacoes
-                        .OrderByDescending(t => t.Realizado_Em)
-                        .Take(10)
-                })
-                .FirstOrDefault());
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        modelBuilder.Entity<Cliente>(entity =>
-        {
-            entity.ToTable("cliente");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id");
-            entity.Property(e => e.Saldo).HasColumnName("saldo");
-            entity.Property(e => e.Limite).HasColumnName("limite");
-        });
-
-        modelBuilder.Entity<Transacao>(entity =>
-        {
-            entity.ToTable("transacao");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id");
-            entity.Property(e => e.Valor).HasColumnName("valor");
-            entity.Property(e => e.Tipo).HasColumnName("tipo").HasMaxLength(1);
-            entity.Property(e => e.Descricao).HasColumnName("descricao").HasMaxLength(255);
-            entity.Property(e => e.Realizado_Em).HasColumnName("realizado_em");
-            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
-
-            entity.HasOne(e => e.Cliente)
-                .WithMany(c => c.Transacoes)
-                .HasForeignKey(e => e.ClienteId);
-        });
-    }
-}
