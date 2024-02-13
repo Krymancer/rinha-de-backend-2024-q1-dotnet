@@ -1,3 +1,4 @@
+//string connectionString = "Host=host.docker.internal;Port=9876;Database=db;Username=user;Password=password;Maximum Pool Size=131072;"; // Dev test string
 string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;Maximum Pool Size=131072;";
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +22,8 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
 
     var saldo = read.GetInt32(0);
     var limite = read.GetInt32(1);
+
+    read.Close();
 
     if (request.Tipo == 'c') saldo += request.Valor;
     else if (request.Tipo == 'd' && saldo - request.Valor < -limite) return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
@@ -67,8 +70,9 @@ app.MapGet("/clientes/{id}/extrato", async (int id) =>
     var limite = read.GetInt32(1);
     var data_extrato = DateTime.UtcNow;
     var ultimas_transacoes = new List<object>();
+    read.Close();
 
-    query = "SELECT valor, tipo, descricao, realizada_em FROM Transacao WHERE cliente_id = @cliente_id ORDER BY realizada_em DESC LIMIT 10";
+    query = "SELECT valor, tipo, descricao, realizado_em FROM Transacao WHERE cliente_id = @cliente_id ORDER BY realizado_em DESC LIMIT 10";
     command = new Npgsql.NpgsqlCommand(query, connection);
     command.Parameters.AddWithValue("cliente_id", id);
     var reader = await command.ExecuteReaderAsync();

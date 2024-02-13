@@ -5,7 +5,7 @@ CREATE TABLE cliente (
 );
 
 CREATE TABLE transacao (
-    id INT PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     valor INT NOT NULL,
     tipo CHAR(1) NOT NULL,
     descricao VARCHAR(10) NOT NULL,

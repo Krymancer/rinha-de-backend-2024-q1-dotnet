@@ -10,13 +10,9 @@ services:
     volumes:
       - ./conf/postgres/:/docker-entrypoint-initdb.d/
     ports:
-      - 5432:5432
+      - 9876:5432
     # deploy:
     #   resources:
     #     limits:
     #       cpus: '0.50'
     #       memory: '1GB'
-networks:
-  default:
-    driver: bridge
-    name: network
