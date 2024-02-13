@@ -1,0 +1,22 @@
+version: '3.5'
+services:
+  db:
+    image: postgres
+    hostname: db
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_USER: user
+      POSTGRES_DB: db
+    volumes:
+      - ./conf/postgres/:/docker-entrypoint-initdb.d/
+    ports:
+      - 5432:5432
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.50'
+    #       memory: '1GB'
+networks:
+  default:
+    driver: bridge
+    name: network
