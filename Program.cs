@@ -8,23 +8,18 @@ var app = builder.Build();
 
 app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request, AppDbContext dbContext) =>
 {
-    if (request.Tipo != 'd' && request.Tipo != 'c') return Results.BadRequest("Tipo de transação inválido");
-    if (request.Valor <= 0) return Results.BadRequest("Valor da transação inválido");
-    if (request.Descricao.Length < 1) return Results.BadRequest("Descrição da transação inválida");
+    if (request.Tipo != 'd' && request.Tipo != 'c' || request.Valor <= 0 || request.Descricao.Length < 1)
+    {
+        return Results.StatusCode(StatusCodes.Status400BadRequest);
+    }
 
     var cliente = AppDbContext.GetCliente(dbContext, id);
 
-    if (cliente == null)
-    {
-        return Results.NotFound("Cliente não encontrado");
-    }
-
-    int novoSaldo = 0;
+    if (cliente is null) return Results.StatusCode(StatusCodes.Status404NotFound);
 
     if (request.Tipo == 'c')
     {
         cliente.Saldo += request.Valor;
-        novoSaldo = cliente.Saldo;
     }
     else if (request.Tipo == 'd')
     {
@@ -34,7 +29,6 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
         }
 
         cliente.Saldo -= request.Valor;
-        novoSaldo = cliente.Saldo;
     }
 
     await dbContext.SaveChangesAsync();
@@ -42,27 +36,22 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
     return Results.Ok(new
     {
         Limite = cliente.Limite,
-        Saldo = novoSaldo
+        Saldo = cliente.Saldo,
     });
 
 });
 
-app.MapGet("/clientes/{id}/extrato", async (int id, AppDbContext dbContext) =>
+app.MapGet("/clientes/{id}/extrato", (int id, AppDbContext dbContext) =>
 {
-    var cliente = AppDbContext.GetClienteAndTrasacoes(dbContext, id);
+    var cliente = AppDbContext.GetClienteAndTrasacoesWithLatestTransactions(dbContext, id);
 
-    if (cliente == null)
-    {
-        return Results.NotFound("Cliente não encontrado");
-    }
+    if (cliente is null) return Results.StatusCode(StatusCodes.Status404NotFound);
 
     var saldoTotal = cliente.Saldo;
     var dataExtrato = DateTime.UtcNow;
     var limite = cliente.Limite;
 
     var ultimasTransacoes = cliente.Transacoes
-        .OrderByDescending(t => t.Realizado_Em)
-        .Take(10)
         .Select(t => new
         {
             valor = t.Valor,
@@ -111,7 +100,6 @@ public class Transacao
 public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
-
     public DbSet<Cliente> Clientes { get; set; }
     public DbSet<Transacao> Transacoes { get; set; }
 
@@ -119,11 +107,20 @@ public class AppDbContext : DbContext
     EF.CompileQuery((AppDbContext context, int id) =>
         context.Clientes.FirstOrDefault(c => c.Id == id));
 
-    public static Func<AppDbContext, int, Cliente?> GetClienteAndTrasacoes =
-    EF.CompileQuery((AppDbContext context, int id) =>
-        context.Clientes
-            .Include(c => c.Transacoes)
-            .FirstOrDefault(c => c.Id == id));
+    public static Func<AppDbContext, int, Cliente?> GetClienteAndTrasacoesWithLatestTransactions =
+        EF.CompileQuery((AppDbContext context, int id) =>
+            context.Clientes
+                .Where(c => c.Id == id)
+                .Select(c => new Cliente
+                {
+                    Id = c.Id,
+                    Saldo = c.Saldo,
+                    Limite = c.Limite,
+                    Transacoes = c.Transacoes
+                        .OrderByDescending(t => t.Realizado_Em)
+                        .Take(10)
+                })
+                .FirstOrDefault());
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
