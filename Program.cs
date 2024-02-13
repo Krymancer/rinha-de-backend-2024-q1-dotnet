@@ -12,7 +12,7 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
     if (request.Valor <= 0) return Results.BadRequest("Valor da transação inválido");
     if (request.Descricao.Length < 1) return Results.BadRequest("Descrição da transação inválida");
 
-    var cliente = await dbContext.Clientes.FindAsync(id);
+    var cliente = AppDbContext.GetCliente(dbContext, id);
 
     if (cliente == null)
     {
@@ -49,9 +49,7 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
 
 app.MapGet("/clientes/{id}/extrato", async (int id, AppDbContext dbContext) =>
 {
-    var cliente = await dbContext.Clientes
-        .Include(c => c.Transacoes)
-        .FirstOrDefaultAsync(c => c.Id == id);
+    var cliente = AppDbContext.GetClienteAndTrasacoes(dbContext, id);
 
     if (cliente == null)
     {
@@ -91,8 +89,6 @@ app.MapGet("/clientes/{id}/extrato", async (int id, AppDbContext dbContext) =>
 await app.RunAsync("http://0.0.0.0:80");
 
 public record TransacaoPayload(int Valor, char Tipo, string Descricao);
-public record TransacaoResponse(int limite, int saldo);
-
 public class Cliente
 {
     public int Id { get; set; }
@@ -118,6 +114,16 @@ public class AppDbContext : DbContext
 
     public DbSet<Cliente> Clientes { get; set; }
     public DbSet<Transacao> Transacoes { get; set; }
+
+    public static Func<AppDbContext, int, Cliente?> GetCliente =
+    EF.CompileQuery((AppDbContext context, int id) =>
+        context.Clientes.FirstOrDefault(c => c.Id == id));
+
+    public static Func<AppDbContext, int, Cliente?> GetClienteAndTrasacoes =
+    EF.CompileQuery((AppDbContext context, int id) =>
+        context.Clientes
+            .Include(c => c.Transacoes)
+            .FirstOrDefault(c => c.Id == id));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
