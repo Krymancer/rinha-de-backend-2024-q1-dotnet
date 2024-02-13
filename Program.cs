@@ -1,11 +1,13 @@
 //string connectionString = "Host=host.docker.internal;Port=9876;Database=db;Username=user;Password=password;Maximum Pool Size=131072;"; // Dev test string
-string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;Maximum Pool Size=131072;";
+string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;Maximum Pool Size=100;Max Auto Prepare = 1;";
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
 app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request) =>
 {
+    if(id < 1 || id > 5) return Results.StatusCode(StatusCodes.Status404NotFound);
+
     if (request is null || request.Tipo != 'd' && request.Tipo != 'c' || request.Valor <= 0 || request.Descricao.Length < 1)
     {
         return Results.StatusCode(StatusCodes.Status400BadRequest);
@@ -36,7 +38,6 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
     command.Parameters.AddWithValue("descricao", request.Descricao);
     command.Parameters.AddWithValue("realizado_em", DateTime.UtcNow);
     command.Parameters.AddWithValue("cliente_id", id);
-
     await command.ExecuteNonQueryAsync();
 
     query = "UPDATE cliente SET saldo = @saldo WHERE id = @id";
@@ -57,6 +58,8 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
 
 app.MapGet("/clientes/{id}/extrato", async (int id) =>
 {
+    if(id < 1 || id > 5) return Results.StatusCode(StatusCodes.Status404NotFound);
+
     var connection = new Npgsql.NpgsqlConnection(connectionString);
     connection.Open();
 
