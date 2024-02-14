@@ -6,7 +6,7 @@ services:
     depends_on:
       - db
     expose:
-      - "80"
+      - "99"
     deploy:
       resources:
         limits:
