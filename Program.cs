@@ -41,10 +41,7 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
         int saldo = command.Parameters["o_saldo"].Value != DBNull.Value ? Convert.ToInt32(command.Parameters["o_saldo"].Value) : -1;
         int limite = command.Parameters["o_limite"].Value != DBNull.Value ? Convert.ToInt32(command.Parameters["o_limite"].Value) : -1;
 
-        if(saldo == -1 || limite == -1)
-        {
-            return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
-        }
+        if(saldo == -1 || limite == -1) return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
 
         await connection.CloseAsync();
 
