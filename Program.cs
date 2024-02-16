@@ -1,9 +1,21 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Diagnostics;
 
 string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;";
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
+
+app.UseExceptionHandler(c => c.Run(async context =>
+{
+    var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+    
+    if (exception is BadHttpRequestException badHttpRequestException)
+    {
+        context.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+        await context.Response.CompleteAsync();
+    }
+}));
 
 app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request) =>
 {

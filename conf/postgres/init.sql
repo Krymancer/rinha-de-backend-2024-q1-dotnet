@@ -14,6 +14,9 @@ CREATE TABLE transacao (
     FOREIGN KEY (cliente_id) REFERENCES cliente(id)
 );
 
+CREATE INDEX idx_cliente ON cliente(id) INCLUDE (saldo, limite);
+CREATE INDEX idx_transacao_cliente ON transacao(cliente_id);
+
 CREATE PROCEDURE realizar_transacao(
     t_client_id INT,
     t_valor INT,
