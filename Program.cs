@@ -1,6 +1,6 @@
 using Npgsql;
 
-string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;";
+string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;Maximum Pool Size=1024;Timeout=1;";
 var builder = WebApplication.CreateBuilder(args);
 
 var app = builder.Build();
