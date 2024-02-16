@@ -10,7 +10,7 @@ services:
     volumes:
       - ./conf/postgres/:/docker-entrypoint-initdb.d/
     ports:
-      - 9876:5432
+      - 5432:5432
     # deploy:
     #   resources:
     #     limits:

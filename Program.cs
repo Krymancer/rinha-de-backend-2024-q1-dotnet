@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Diagnostics;
+using Npgsql;
 
 string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;";
 
@@ -31,36 +32,59 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
         return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
     }
 
-    using (var connection = new Npgsql.NpgsqlConnection(connectionString))
+    using (var connection = new NpgsqlConnection(connectionString))
     {
         connection.Open();
 
-        var command = new Npgsql.NpgsqlCommand("realizar_transacao", connection);
-        command.CommandType = System.Data.CommandType.StoredProcedure;
-        command.Parameters.AddWithValue("t_client_id", id);
-        command.Parameters.AddWithValue("t_valor", request.Tipo == 'd' ? -request.Valor : request.Valor);
-        command.Parameters.AddWithValue("t_tipo", request.Tipo);
-        command.Parameters.AddWithValue("t_descricao", request.Descricao);
+        string query = "SELECT saldo, limite FROM cliente WHERE id = @id";
+        var command = new NpgsqlCommand(query, connection);
+        command.Parameters.AddWithValue("id", id);
+        var read = await command.ExecuteReaderAsync();
 
-        command.Parameters.Add(new Npgsql.NpgsqlParameter("o_saldo", NpgsqlTypes.NpgsqlDbType.Integer));
-        command.Parameters["o_saldo"].Direction = System.Data.ParameterDirection.Output;
+        if (!read.Read()) return Results.StatusCode(StatusCodes.Status404NotFound);
 
-        command.Parameters.Add(new Npgsql.NpgsqlParameter("o_limite", NpgsqlTypes.NpgsqlDbType.Integer));
-        command.Parameters["o_limite"].Direction = System.Data.ParameterDirection.Output;
+        Console.WriteLine(id);
 
-        await command.ExecuteNonQueryAsync();
+        var saldo_cliente = read.GetInt32(0);
+        var limite_cliente = read.GetInt32(1);
+        read.Close();
 
-        int saldo = command.Parameters["o_saldo"].Value != DBNull.Value ? Convert.ToInt32(command.Parameters["o_saldo"].Value) : -1;
-        int limite = command.Parameters["o_limite"].Value != DBNull.Value ? Convert.ToInt32(command.Parameters["o_limite"].Value) : -1;
+        if(request.Tipo == 'c') {
+            saldo_cliente += request.Valor;
+        }else if(saldo_cliente - request.Valor < limite_cliente * -1) {
+            return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
+        }else {
+            saldo_cliente -= request.Valor;
+        }
 
-        if(saldo == -1 || limite == -1) return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
+        using(var transaction = connection.BeginTransaction()) {
+            query = "INSERT INTO Transacao (valor, tipo, descricao, cliente_id) VALUES (@valor, @tipo, @descricao, @cliente_id)";
+            using (command = new NpgsqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("valor", request.Valor);
+                command.Parameters.AddWithValue("tipo", request.Tipo);
+                command.Parameters.AddWithValue("descricao", request.Descricao);
+                command.Parameters.AddWithValue("cliente_id", id);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            query = "UPDATE cliente SET saldo = @saldo WHERE id = @id";
+            using (command = new NpgsqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("saldo", saldo_cliente);
+                command.Parameters.AddWithValue("id", id);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            transaction.Commit();
+        }
 
         await connection.CloseAsync();
 
         return Results.Ok(new
         {
-            Limite = limite,
-            Saldo = saldo,
+            Limite = limite_cliente,
+            Saldo = saldo_cliente,
         });
     }
 });
@@ -69,24 +93,24 @@ app.MapGet("/clientes/{id}/extrato", async (int id) =>
 {
     if (id < 1 || id > 5) return Results.StatusCode(StatusCodes.Status404NotFound);
 
-    using (var connection = new Npgsql.NpgsqlConnection(connectionString))
+    using (var connection = new NpgsqlConnection(connectionString))
     {
         connection.Open();
-
         string query = "SELECT saldo, limite FROM cliente WHERE id = @id";
-        var command = new Npgsql.NpgsqlCommand(query, connection);
+        var command = new NpgsqlCommand(query, connection);
+        command.Parameters.AddWithValue("id", id);
         var read = await command.ExecuteReaderAsync();
 
         if (!read.Read()) return Results.StatusCode(StatusCodes.Status404NotFound);
 
-        var saldo = read.GetInt32(0);
-        var limite = read.GetInt32(1);
+        var saldo_cliente = read.GetInt32(0);
+        var limite_cliente = read.GetInt32(1);
         var data_extrato = DateTime.UtcNow;
         var ultimas_transacoes = new List<object>();
         read.Close();
 
         query = "SELECT valor, tipo, descricao, realizado_em FROM Transacao WHERE cliente_id = @cliente_id ORDER BY realizado_em DESC LIMIT 10";
-        command = new Npgsql.NpgsqlCommand(query, connection);
+        command = new NpgsqlCommand(query, connection);
         command.Parameters.AddWithValue("cliente_id", id);
         var reader = await command.ExecuteReaderAsync();
 
@@ -107,9 +131,9 @@ app.MapGet("/clientes/{id}/extrato", async (int id) =>
         {
             saldo = new
             {
-                total = saldo,
+                total = saldo_cliente,
                 data_extrato = data_extrato,
-                limite = limite,
+                limite = limite_cliente,
             },
             ultimas_transacoes = ultimas_transacoes
         });
