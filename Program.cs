@@ -1,7 +1,15 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Npgsql;
 
 string connectionString = "Host=db;Port=5432;Database=db;Username=user;Password=password;Minimum Pool Size=50;Maximum Pool Size=100;";
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, JsonContext.Default);
+});
 
 var app = builder.Build();
 
@@ -10,7 +18,6 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
     if (id < 1 || id > 5) return Results.StatusCode(StatusCodes.Status404NotFound);
 
     if (
-        request is null ||
         request.Tipo != 'd' && request.Tipo != 'c' ||
         request.Valor <= 0 || !(request.Valor % 1 == 0) ||
         request.Descricao is null || request.Descricao.Length < 1 || request.Descricao.Length > 10
@@ -71,12 +78,7 @@ app.MapPost("/clientes/{id}/transacoes", async (int id, TransacaoPayload request
         }
 
         await connection.CloseAsync();
-
-        return Results.Ok(new
-        {
-            Limite = limite_cliente,
-            Saldo = saldo_cliente,
-        });
+        return Results.Ok(new TransacaoResponse(saldo_cliente, limite_cliente));
     }
 });
 
@@ -97,7 +99,7 @@ app.MapGet("/clientes/{id}/extrato", async (int id) =>
         var saldo_cliente = read.GetInt32(0);
         var limite_cliente = read.GetInt32(1);
         var data_extrato = DateTime.UtcNow;
-        var ultimas_transacoes = new List<object>();
+        var ultimas_transacoes = new List<TransacaoExtrato>();
         read.Close();
 
         query = "SELECT valor, tipo, descricao, realizado_em FROM Transacao WHERE cliente_id = @cliente_id ORDER BY realizado_em DESC LIMIT 10";
@@ -107,7 +109,7 @@ app.MapGet("/clientes/{id}/extrato", async (int id) =>
 
         while (await reader.ReadAsync())
         {
-            ultimas_transacoes.Add(new
+            ultimas_transacoes.Add(new TransacaoExtrato
             {
                 valor = reader.GetInt32(0),
                 tipo = reader.GetChar(1),
@@ -118,18 +120,27 @@ app.MapGet("/clientes/{id}/extrato", async (int id) =>
 
         await connection.CloseAsync();
 
-        return Results.Ok(new
+        return Results.Ok(new ExtratoResponse
         {
-            saldo = new
-            {
-                total = saldo_cliente,
-                data_extrato = data_extrato,
-                limite = limite_cliente,
-            },
+            saldo = new SaldoExtrato(saldo_cliente, data_extrato, limite_cliente),
             ultimas_transacoes = ultimas_transacoes
         });
     }
 });
 
 await app.RunAsync("http://0.0.0.0:3000");
-public record TransacaoPayload(float Valor, char Tipo, string Descricao);
+public record struct TransacaoPayload(float Valor, char Tipo, string Descricao);
+public record struct TransacaoResponse(int saldo, int limite);
+public record struct TransacaoExtrato(int valor, char tipo, string descricao, DateTime realizada_em);
+public record struct SaldoExtrato(int total, DateTime data_extrato, int limite);
+public record struct ExtratoResponse(SaldoExtrato saldo, List<TransacaoExtrato> ultimas_transacoes);
+
+[JsonSerializable(typeof(TransacaoPayload))]
+[JsonSerializable(typeof(TransacaoResponse))]
+[JsonSerializable(typeof(TransacaoExtrato))]
+[JsonSerializable(typeof(SaldoExtrato))]
+[JsonSerializable(typeof(ExtratoResponse))]
+[JsonSerializable(typeof(int))]
+[JsonSerializable(typeof(char))]
+[JsonSerializable(typeof(DateTime))]
+public partial class JsonContext : JsonSerializerContext { }
