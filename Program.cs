@@ -107,7 +107,7 @@ app.MapGet("/clientes/{id}/extrato", async (int id) =>
 string? port = Environment.GetEnvironmentVariable("PORT");
 if (port is null) throw new ArgumentNullException("PORT is null");
 
-await app.RunAsync("http://0.0.0.0:" + port);
+await app.RunAsync("http://localhost:" + port);
 
 public enum CriarTransacaoRetorno {
     NotFound = 1,
